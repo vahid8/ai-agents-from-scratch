@@ -37,6 +37,7 @@ uv run --env-file .env python episodes/01_agent.py
 | Ep | Topic |
 |----|-------|
 | 01 | What *is* an agent? — the minimal agent loop |
+| 02 | ReAct — make the agent think out loud (Thought / Action / Observation) |
 
 ## Security
 
