@@ -1,0 +1,9 @@
+[project]
+name = "ai-agents-from-scratch"
+version = "0.1.0"
+description = "AI Agents from scratch — YouTube series (Season 2) companion code"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "openai>=2.38.0",
+]
