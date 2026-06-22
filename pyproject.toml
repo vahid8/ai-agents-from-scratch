@@ -5,5 +5,6 @@ description = "AI Agents from scratch — YouTube series (Season 2) companion co
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    "ddgs>=9.14.4",
     "openai>=2.38.0",
 ]
