@@ -39,6 +39,7 @@ uv run --env-file .env python episodes/01_agent.py
 | 01 | What *is* an agent? — the minimal agent loop |
 | 02 | ReAct — make the agent think out loud (Thought / Action / Observation) |
 | 03 | Web-search agent — give it a real tool to research the live web (DuckDuckGo, no key) |
+| 04 | A toolbox — three tools (calculator, web search, RAG retrieval) and the agent *chooses* which to use |
 
 ## Security
 
