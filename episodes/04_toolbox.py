@@ -9,8 +9,8 @@ not guess. Ask about the world and it should search the web.
 This episode we hand it three tools at once and let it route between them:
 
     calculator[expr]    -> arithmetic, done by real Python (LLMs fumble big numbers)
-    web_search[query]   -> facts from the open web        (Ep3's tool, trimmed)
-    search_docs[query]  -> OUR OWN handbook, by MEANING    (RAG retrieval, from S1)
+    web_search[query]   -> facts from the open web         (Tavily, DuckDuckGo fallback)
+    search_docs[query]  -> OUR OWN handbook, by MEANING     (RAG retrieval, from S1)
 
 `search_docs` is the interesting one: it's retrieval-augmented generation reused as
 a TOOL. We embed a tiny local handbook once at startup, and when the agent calls it
@@ -31,6 +31,7 @@ import re
 import time
 from pathlib import Path
 
+import httpx
 from ddgs import DDGS
 from openai import OpenAI
 
@@ -67,29 +68,78 @@ def calculator(expression: str) -> str:
 
 
 # --- TOOL 2: web_search — facts from the open web. -----------------------------
-# Ep3's tool, trimmed to the essentials: top results as title + snippet + URL.
+# Ep3's tool, now locked to Tavily for quality. Tavily is an agent-tuned search:
+# cleaner, more relevant results than raw DuckDuckGo. It needs a (free-tier) key,
+# so when no key is set we fall back to keyless DuckDuckGo -- the repo still runs
+# with just a Gemini key, you just get better search once you add a Tavily key.
 MAX_RESULTS = 4
+
+
+def get_tavily_key() -> str | None:
+    """Read TAVILY_API_KEY, or the file TAVILY_API_KEY_FILE points to (else None).
+
+    Same paths-not-secrets rule as the Gemini key: keep the real key in ~/.secrets/
+    and point TAVILY_API_KEY_FILE at it (free tier: https://tavily.com). None here
+    just means we fall back to DuckDuckGo.
+    """
+    if key := os.environ.get("TAVILY_API_KEY"):
+        return key
+    if key_file := os.environ.get("TAVILY_API_KEY_FILE"):
+        return Path(key_file).expanduser().read_text().strip()
+    return None
+
+
+def _format(results: list[dict]) -> str:
+    """Both backends hand back title/body/href rows -- render them the same way."""
+    if not results:
+        return "no results found"
+    lines = []
+    for i, r in enumerate(results, 1):
+        snippet = " ".join((r.get("body") or "").split())[:200]
+        lines.append(f"[{i}] {r.get('title', '')}\n    {snippet}\n    {r.get('href', '')}")
+    return "\n".join(lines)
+
+
+def _tavily(query: str, key: str) -> list[dict]:
+    """Tavily REST -- one HTTP POST, normalised to our row shape (no extra library)."""
+    resp = httpx.post(
+        "https://api.tavily.com/search",
+        headers={"Authorization": f"Bearer {key}"},
+        json={"query": query, "max_results": MAX_RESULTS},
+        timeout=20,
+    )
+    resp.raise_for_status()
+    return [{"title": r.get("title"), "body": r.get("content"), "href": r.get("url")}
+            for r in resp.json().get("results", [])]
+
+
+def _duckduckgo(query: str) -> list[dict]:
+    """Keyless fallback. Free search rate-limits, so RETRY with backoff."""
+    for attempt in range(3):
+        try:
+            if results := DDGS().text(query, max_results=MAX_RESULTS):
+                return results
+        except Exception:  # network/rate-limit hiccups shouldn't kill the loop
+            pass
+        time.sleep(1.5 * (attempt + 1))
+    return []
 
 
 def web_search(query: str) -> str:
     """Search the live web; return the top results as title + snippet + url.
 
-    Free search rate-limits, so we RETRY with backoff instead of crashing -- a flaky
-    tool is a fact of agent life, not a reason to kill the loop (same as Ep3).
+    Prefers Tavily (agent-tuned, higher quality) when a key is set; otherwise -- or
+    if Tavily errors -- falls back to keyless DuckDuckGo so the loop never stalls.
     """
-    for attempt in range(3):
+    query = query.strip()
+    if key := get_tavily_key():
         try:
-            results = DDGS().text(query.strip(), max_results=MAX_RESULTS)
-            if results:
-                lines = []
-                for i, r in enumerate(results, 1):
-                    snippet = " ".join((r.get("body") or "").split())[:200]
-                    lines.append(f"[{i}] {r.get('title', '')}\n    {snippet}\n    {r.get('href', '')}")
-                return "\n".join(lines)
-        except Exception as e:  # network/rate-limit hiccups shouldn't kill the loop
-            last_err = f"search error: {e}"
-        time.sleep(1.5 * (attempt + 1))
-    return locals().get("last_err", "no results found")
+            return _format(_tavily(query, key))
+        except Exception as e:  # a flaky tool is no reason to crash -- try DuckDuckGo
+            if rows := _duckduckgo(query):
+                return _format(rows)
+            return f"search error (tavily): {e}"
+    return _format(_duckduckgo(query))
 
 
 # --- TOOL 3: search_docs — retrieval over OUR handbook (RAG as a tool). --------
