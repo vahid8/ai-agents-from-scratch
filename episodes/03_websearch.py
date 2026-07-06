@@ -107,11 +107,11 @@ def web_search(query: str) -> str:
     default; Tavily if TAVILY_API_KEY is set. Free search is flaky, so we RETRY.
     """
     query = query.strip()
-    if key := get_tavily_key():
-        try:
-            return _format_results(_tavily_search(query, key))
-        except Exception as e:
-            return f"search error (tavily): {e}"
+    #if key := get_tavily_key():
+    #    try:
+    #        return _format_results(_tavily_search(query, key))
+    #    except Exception as e:
+    #        return f"search error (tavily): {e}"
 
     last_err = "no results found"
     for attempt in range(3):  # DuckDuckGo rate-limits; back off and try again
