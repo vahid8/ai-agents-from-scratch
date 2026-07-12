@@ -102,7 +102,15 @@ def remember(fact: str) -> str:
 
 
 def recall(query: str, k: int = 3) -> str:
-    """Look facts up by MEANING: embed the query, return the closest saved facts."""
+    """Look facts up by MEANING: embed the query, return the closest saved facts.
+
+    THIS is the bridge from disk to the chat. Long-term facts are NEVER dumped
+    into the prompt automatically -- a new conversation starts empty. A fact only
+    enters the chat when the agent decides to call recall[...]; its return string
+    becomes an Observation appended to `messages` (see agent_reply), and that is
+    the moment the model can finally see it. Memory is retrieved on demand, not
+    carried along -- the same idea RAG uses.
+    """
     if not memory:
         return "long-term memory is empty"
     qv = embed([query.strip()])[0]
@@ -210,7 +218,12 @@ print("=== SESSION 1 — you tell the agent things (saved to long-term memory) =
 chat(SESSION_1)
 
 print("\n=== the program 'closes' — short-term memory is wiped, the JSON file stays ===")
-memory = load_memory()  # prove it: reload purely from disk into a fresh process state
+# Reload purely from disk into a fresh `memory` list, simulating a restart. Note
+# this reload does NOT feed the facts into Session 2's chat -- that only happens
+# when the agent calls recall[...] (see recall's note above). All this line does is
+# repopulate the `memory` global that recall reads from, proving the facts live on
+# disk independently of the (now-discarded) Session 1 conversation.
+memory = load_memory()
 print(f"💾 long-term memory on disk: {len(memory)} fact(s)\n")
 
 print("=== SESSION 2 — a brand-new conversation; only long-term memory survived ===\n")
