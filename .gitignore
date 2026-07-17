@@ -4,3 +4,5 @@ __pycache__/
 episodes-private/
 .playwright-mcp/
 episodes/agent_memory.json
+episodes/traces.db
+episodes/md_memory/

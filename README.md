@@ -41,6 +41,8 @@ uv run --env-file .env python episodes/01_agent.py
 | 03 | Web-search agent — give it a real tool to research the live web (DuckDuckGo, no key) |
 | 04 | A toolbox — three tools (calculator, web search, RAG retrieval) and the agent *chooses* which to use |
 | 05 | Memory — short-term (the conversation) + long-term (a vector store on disk) so the agent stops forgetting |
+| 06 | Planning — plan-and-execute vs ReAct, plus a tiny tracer that shows every step, token, and cost |
+| 07 | Memory pt.2 — markdown files + a text index (FTS5) instead of vectors; retrieve by keyword, not meaning |
 
 ## Security
 
