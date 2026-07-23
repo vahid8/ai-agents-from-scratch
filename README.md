@@ -43,6 +43,8 @@ uv run --env-file .env python episodes/01_agent.py
 | 05 | Memory — short-term (the conversation) + long-term (a vector store on disk) so the agent stops forgetting |
 | 06 | Planning — plan-and-execute vs ReAct, plus a tiny tracer that shows every step, token, and cost |
 | 07 | Memory pt.2 — markdown files + a text index (FTS5) instead of vectors; retrieve by keyword, not meaning |
+| 08 | Multi-agent — an orchestrator hands work to narrow workers; a hand-off is a recursive tool call, and the tracer nests |
+| 09 | Reflection — the agent critiques its OWN draft with tools, then revises until the critic passes (Reflexion, by hand) |
 
 ## Security
 

@@ -29,12 +29,19 @@ DB = Path(__file__).with_name("traces.db")
 PRICES = {"gemini-2.5-flash": (0.30, 2.50)}
 
 
+def _line(text: str, width: int = 72) -> str:
+    """Squash a value onto one short line so the tree stays a tree."""
+    flat = " ".join(str(text).split())
+    return flat if len(flat) <= width else flat[: width - 1] + "…"
+
+
 class Tracer:
     """Wrap ONE agent run. Call .llm()/.tool() as steps happen, then .finish()."""
 
-    def __init__(self, task: str, model: str):
+    def __init__(self, task: str, model: str, parent: "Tracer | None" = None):
         self.task, self.model = task, model
-        self.steps: list[dict] = []          # flat for now; nesting arrives with multi-agent
+        self.steps: list[dict] = []
+        self._parent = parent                # set when this run is a sub-agent's run
         self._t0 = time.perf_counter()
 
     def llm(self, resp, dt: float) -> None:
@@ -56,23 +63,54 @@ class Tracer:
             "ms": round(dt * 1000), "result": result.replace("\n", " ")[:120],
         })
 
+    def child(self, name: str, task: str) -> "Tracer":
+        """Hand work to a SUB-AGENT (Ep8): its own run, nested inside this one.
+
+        The delegation shows up as one `agent` step here -- its cost and duration are
+        the whole sub-run's -- and the sub-run's own steps print indented underneath.
+        """
+        sub = Tracer(task, self.model, parent=self)
+        self.steps.append({
+            "kind": "agent", "name": name, "arg": task,
+            "in_tok": 0, "out_tok": 0, "cost": 0.0, "ms": 0, "result": "", "sub": sub,
+        })
+        return sub
+
     def finish(self, answer: str) -> None:
-        """End the run: print the tree and save it to disk."""
+        """End the run: print the tree and save it to disk.
+
+        A sub-agent's run doesn't print on its own -- it reports its answer, cost and
+        duration up to the delegation step, and the top-level run prints everything.
+        """
         total = sum(s["cost"] for s in self.steps)
         ms = round((time.perf_counter() - self._t0) * 1000)
+        if self._parent is not None:
+            for s in self._parent.steps:                  # fill in OUR step in the parent
+                if s.get("sub") is self:
+                    s["result"] = answer.replace("\n", " ")[:120]
+                    s["cost"], s["ms"] = total, ms
+            self._save(answer, total, ms)                 # still a run of its own on disk
+            return
+        print()
         self._print_tree(answer, total, ms)
+        print()
         self._save(answer, total, ms)
 
     # --- output ---------------------------------------------------------------
-    def _print_tree(self, answer: str, total: float, ms: int) -> None:
-        print(f"\n run: {self.task}")
+    def _print_tree(self, answer: str, total: float, ms: int, indent: str = "") -> None:
+        print(f"{indent} run: {_line(self.task)}")
         for i, s in enumerate(self.steps, 1):
             if s["kind"] == "llm":
-                print(f" ├─ {i} llm   {s['in_tok']}+{s['out_tok']} tok  "
+                print(f"{indent} ├─ {i} llm   {s['in_tok']}+{s['out_tok']} tok  "
                       f"${s['cost']:.4f}  {s['ms']}ms")
+            elif s["kind"] == "agent":
+                print(f"{indent} ├─ {i} agent {s['name']}({_line(s['arg'])})  "
+                      f"${s['cost']:.4f}  {s['ms']}ms")
+                s["sub"]._print_tree(_line(s["result"]), s["cost"], s["ms"], indent + " │ ")
             else:
-                print(f" ├─ {i} tool  {s['name']}({s['arg']}) -> {s['result']}  {s['ms']}ms")
-        print(f" └─ answer: {answer}   total ${total:.4f}  {ms}ms\n")
+                print(f"{indent} ├─ {i} tool  {s['name']}({_line(s['arg'])}) -> "
+                      f"{_line(s['result'])}  {s['ms']}ms")
+        print(f"{indent} └─ answer: {_line(answer)}   total ${total:.4f}  {ms}ms")
 
     def _save(self, answer: str, total: float, ms: int) -> None:
         with sqlite3.connect(DB) as db:
