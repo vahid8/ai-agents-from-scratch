@@ -45,6 +45,7 @@ uv run --env-file .env python episodes/01_agent.py
 | 07 | Memory pt.2 — markdown files + a text index (FTS5) instead of vectors; retrieve by keyword, not meaning |
 | 08 | Multi-agent — an orchestrator hands work to narrow workers; a hand-off is a recursive tool call, and the tracer nests |
 | 09 | Reflection — the agent critiques its OWN draft with tools, then revises until the critic passes (Reflexion, by hand) |
+| 10 | MCP from scratch — speak the Model Context Protocol by hand (JSON-RPC over stdio) so the agent can use tools it didn't write, discovered at runtime |
 
 ## Security
 
