@@ -1,43 +1,65 @@
-"""Episode 10 (part 1 of 2) — an MCP SERVER, by hand.
+"""Episode 10 (part 1 of 2) — an MCP SERVER with FastMCP.
 
-This is the other end of the wire. It is a normal Python program with one unusual
-habit: it reads JSON-RPC messages from **stdin**, one per line, and writes JSON-RPC
-messages back to **stdout**, one per line. That is the whole of MCP's stdio
-transport -- no HTTP, no sockets, no SDK, no dependencies.
+This is the far end of the wire: the "somebody else's tools" half. And it is the shortest
+file in the season, which is the whole point of using the framework.
 
-It answers exactly three methods, which is all a tool server needs:
+MCP -- the Model Context Protocol -- is how an agent uses tools that live in another
+process, written by someone else, discovered at RUNTIME instead of imported. Under the
+branding it is JSON-RPC 2.0 messages, one per line, over this program's stdin and stdout.
+FastMCP writes every one of those lines for us. What is left is the part that is actually
+ours: two Python functions.
 
-    initialize   -- "hello, here is my protocol version and what I can do"
-    tools/list   -- "here are my tools, with a JSON Schema for each one"
-    tools/call   -- "run this tool with these arguments, here is the result"
+🔴 WHY FASTMCP 4, AND WHY THE BETA. MCP changed on 2026-07-28: that revision DELETED the
+`initialize` handshake. The protocol is now **stateless** -- there is no session, and a
+server may infer nothing from earlier requests on the same pipe. Instead every request
+carries its own protocol version and capabilities, and a mandatory `server/discover` call
+replaces the handshake for clients that want to look before they leap. FastMCP 4 speaks
+that revision; FastMCP 3 is still handshake-era. So this episode pins the 4.0 beta -- see
+`[tool.uv] prerelease = "allow"` in pyproject.toml.
 
-The tools themselves are the SAME boring pair we have used since Ep8: a three-entry
-handbook about a fictional product, and the charset-locked calculator. That is on
-purpose. Nothing about the tools is new -- only where they live. In Ep9 the agent
-imported them from the same file. Here they live in a separate process that the
-agent knows nothing about until it asks.
+Statelessness is not a detail. It is why the same server can sit behind an ordinary load
+balancer with a dozen replicas: any replica can answer any request, because the request
+brings everything needed to serve it. Nothing about the two functions below changes.
 
-Two rules that will bite you if you break them:
-  1. NOTHING but MCP messages may go to stdout. One stray print() and you have
-     corrupted the protocol stream. Debug output goes to stderr.
-  2. Every message is ONE line -- messages must not contain embedded newlines.
-     json.dumps() escapes newlines inside strings for us, so this comes free.
+WHAT THE DECORATOR ACTUALLY DOES. `@mcp.tool` reads the function's signature and its
+docstring and generates the JSON Schema that goes out over `tools/list`. The type hints
+become the schema's types; the docstring becomes the description the MODEL reads when it
+decides whether to call this tool. That is the trade with a framework: you stop writing
+the catalogue by hand, so the docstring stops being documentation and becomes prompt.
+Write it for the model. The client prints the generated schema when it connects -- watch
+it and you will see this docstring come back over the wire.
 
-You never run this file yourself -- 10_mcp.py launches it as a subprocess.
+Run it yourself if you like -- it will sit there waiting for JSON on stdin, because that
+is all an MCP server is:
+    uv run --env-file .env python episodes/10_mcp_server.py
+Normally you never do that: 10_mcp.py launches it as a subprocess.
 """
 
-import json
+import logging
 import re
-import sys
 
-# The version of the MCP spec this server speaks. The client sends the version it
-# wants in `initialize`; we answer with the one we actually support, and the two
-# sides agree (or the client walks away).
-PROTOCOL_VERSION = "2025-11-25"
+from fastmcp import FastMCP
+
+# FastMCP logs to stderr at INFO, which the spec explicitly allows (stderr is the server's
+# to use; only stdout is sacred). We quiet it so the terminal shows the AGENT and not the
+# framework -- if a server of yours ever goes silent, turn this back up first.
+logging.getLogger("fastmcp").setLevel(logging.ERROR)
+
+# `instructions` is server-level guidance that a client can read straight off
+# server/discover, before it has listed a single tool.
+mcp = FastMCP(
+    "nimbus-handbook",
+    version="2.0.0",
+    instructions="Answer support questions about the Nimbus Pro plan. Use lookup for "
+                 "facts from the handbook and calculator for arithmetic.",
+)
 
 
 # ============================ THE TOOLS ======================================
-# Ground truth about a product the model has never heard of -- unchanged from Ep9.
+# Ground truth about a product the model has never heard of. Unchanged since Ep8 -- on
+# purpose. Nothing about the tools is new today; only where they live. In Ep9 the agent
+# imported these functions. Today they run in a process the agent knows nothing about
+# until it asks.
 HANDBOOK = {
     "rate limits": "Nimbus Pro allows 60 API requests per minute. Anything above that "
                    "is rejected with HTTP 429 until the next minute starts.",
@@ -47,8 +69,10 @@ HANDBOOK = {
 }
 
 
+@mcp.tool
 def lookup(query: str) -> str:
-    """Look a topic up in the Nimbus handbook by keyword overlap."""
+    """Look up a fact about the Nimbus Pro plan (rate limits, billing, support) in the
+    official handbook. Use this for any factual claim about the plan."""
     words = set(re.findall(r"[a-z0-9]+", query.lower()))
 
     def score(topic: str) -> int:
@@ -64,124 +88,31 @@ def lookup(query: str) -> str:
 _ALLOWED = set("0123456789+-*/(). ")
 
 
+@mcp.tool
 def calculator(expression: str) -> str:
-    """Evaluate a plain arithmetic expression.
-
-    Charset-locked since Ep1: only digits, operators and brackets ever reach eval.
-    Worth re-reading now that the caller is a REMOTE agent we did not write -- a
-    server is the last thing standing between a tool and whatever sent the request.
-    """
+    """Evaluate a plain arithmetic expression, e.g. 150-60. Digits and + - * / ( ) only."""
+    # Charset-locked since Ep1: only digits, operators and brackets ever reach eval. With
+    # no letters, quotes, commas or underscores there is no name to look up and no
+    # attribute to reach through, so there is nothing to call.
+    #
+    # Ep10 tightens it by two lines, and the reason is this episode's whole point: the
+    # caller is now an agent we did not write, on a protocol with no session, so this
+    # function cannot lean on "well, they said hello first". `**` is spelled with two
+    # allowed characters, and `9**9**9**9` is a hang, not an answer -- a denial of
+    # service that passes a charset check. Length is capped for the same reason.
     if not expression or set(expression) - _ALLOWED:
         return "error: numbers and + - * / ( ) only"
+    if "**" in expression or len(expression) > 100:
+        return "error: no exponentiation, 100 characters max"
     try:
         return str(eval(expression))  # noqa: S307 -- input restricted to the charset above
     except Exception as e:
         return f"error: {e}"
 
 
-# ========================= THE TOOL CATALOGUE ================================
-# This is what `tools/list` hands back, and it is the heart of MCP: a machine-readable
-# description of each tool -- its name, what it is for, and a JSON Schema for its
-# arguments. The client has never seen this file, so this catalogue is the ONLY thing
-# telling it what exists. Write the descriptions for the model that will read them.
-TOOLS = [
-    {
-        "name": "lookup",
-        "title": "Nimbus handbook lookup",
-        "description": "Look up a fact about the Nimbus Pro plan (rate limits, "
-                       "billing, support) in the official handbook.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "The topic to look up."}
-            },
-            "required": ["query"],
-        },
-    },
-    {
-        "name": "calculator",
-        "title": "Arithmetic calculator",
-        "description": "Evaluate a plain arithmetic expression, e.g. 150-60.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "expression": {"type": "string",
-                               "description": "Arithmetic using digits and + - * / ( )."}
-            },
-            "required": ["expression"],
-        },
-    },
-]
-
-IMPL = {"lookup": lookup, "calculator": calculator}
-
-
-# ========================== THE THREE METHODS ================================
-def handle(msg: dict) -> dict:
-    """Turn one JSON-RPC request into one JSON-RPC `result` payload."""
-    method = msg.get("method")
-
-    if method == "initialize":
-        # The handshake. We announce the version we speak and which capabilities we
-        # have -- we only do tools, so that is the only capability we declare.
-        return {
-            "protocolVersion": PROTOCOL_VERSION,
-            "capabilities": {"tools": {}},
-            "serverInfo": {"name": "nimbus-handbook", "version": "1.0.0"},
-        }
-
-    if method == "tools/list":
-        return {"tools": TOOLS}
-
-    if method == "tools/call":
-        params = msg.get("params") or {}
-        name = params.get("name")
-        arguments = params.get("arguments") or {}
-        fn = IMPL.get(name)
-        if fn is None:
-            raise LookupError(f"Unknown tool: {name}")
-        try:
-            text = fn(**arguments)
-            is_error = False
-        except Exception as e:
-            # A tool that BLEW UP is not a protocol failure -- the request was valid.
-            # MCP reports it in the result with isError, so the model can read what
-            # went wrong and try again. Protocol errors (below) are for malformed
-            # requests, which a model has no hope of fixing.
-            text, is_error = f"error: {e}", True
-        return {"content": [{"type": "text", "text": text}], "isError": is_error}
-
-    raise NotImplementedError(f"Unknown method: {method}")
-
-
-def main() -> None:
-    """Read one JSON message per line forever; answer the ones that want answering."""
-    for line in sys.stdin:
-        line = line.strip()
-        if not line:
-            continue
-        msg = json.loads(line)
-
-        # No "id" means this is a NOTIFICATION (e.g. notifications/initialized).
-        # Notifications are fire-and-forget: the sender is not waiting, so we must
-        # not reply -- an unexpected response would desynchronise the stream.
-        if "id" not in msg:
-            continue
-
-        try:
-            response = {"jsonrpc": "2.0", "id": msg["id"], "result": handle(msg)}
-        except LookupError as e:
-            response = {"jsonrpc": "2.0", "id": msg["id"],
-                        "error": {"code": -32602, "message": str(e)}}
-        except Exception as e:
-            response = {"jsonrpc": "2.0", "id": msg["id"],
-                        "error": {"code": -32601, "message": str(e)}}
-
-        # One line, then FLUSH. Without the flush the reply sits in a buffer and the
-        # client waits for a message that has technically already been "sent".
-        sys.stdout.write(json.dumps(response) + "\n")
-        sys.stdout.flush()
-
-
 if __name__ == "__main__":
-    main()
+    # Defaults to the stdio transport: read stdin, write stdout, and NOTHING else may
+    # touch stdout or the protocol stream is corrupt. FastMCP's startup banner goes to
+    # stderr, which the spec explicitly allows -- we switch it off to keep the terminal
+    # readable, not because it would break anything.
+    mcp.run(show_banner=False)

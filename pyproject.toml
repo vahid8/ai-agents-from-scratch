@@ -8,4 +8,19 @@ dependencies = [
     "ddgs>=9.14.4",
     "httpx>=0.28.1",
     "openai>=2.38.0",
+    "fastmcp>=4.0.0b1",
+    # named explicitly so the narrow prerelease policy below covers it: `fastmcp` is a
+    # thin wrapper whose real code lives in `fastmcp-slim`, pinned to the same beta.
+    "fastmcp-slim>=4.0.0b1",
 ]
+
+[tool.uv]
+# Ep10 needs FastMCP 4, the first release that speaks the stateless 2026-07-28 MCP
+# revision (4.x is in beta; 3.x is still handshake-era). uv refuses pre-releases unless
+# told otherwise, and it must be told here rather than on the command line because the
+# pre-release is transitive too (fastmcp -> fastmcp-slim==4.0.0b1).
+#
+# NOT "allow": that would let uv pick a pre-release for EVERY dependency in the project,
+# now and in future. "if-necessary-or-explicit" only reaches for one where the
+# requirement itself asks for a pre-release -- i.e. here and nowhere else.
+prerelease = "if-necessary-or-explicit"
