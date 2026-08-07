@@ -15,7 +15,7 @@ server may infer nothing from earlier requests on the same pipe. Instead every r
 carries its own protocol version and capabilities, and a mandatory `server/discover` call
 replaces the handshake for clients that want to look before they leap. FastMCP 4 speaks
 that revision; FastMCP 3 is still handshake-era. So this episode pins the 4.0 beta -- see
-`[tool.uv] prerelease = "allow"` in pyproject.toml.
+`[tool.uv] prerelease = "if-necessary-or-explicit"` in pyproject.toml.
 
 Statelessness is not a detail. It is why the same server can sit behind an ordinary load
 balancer with a dozen replicas: any replica can answer any request, because the request
