@@ -12,9 +12,9 @@ plain Python with the OpenAI SDK pointed at a **free Gemini key**.
 > An agent = **an LLM + tools + a loop + a stop condition.**
 
 That's it. Each episode adds one idea on top of that loop: ReAct, web search,
-memory, planning, multi-agent, reflection, guardrails — built by hand so you can
-see exactly what's happening, then one episode shows a framework as "the grown-up
-version."
+memory, planning, multi-agent, reflection, MCP, guardrails — built by hand so you
+can see exactly what's happening, and the finale hands the same job to a real
+framework so you can see exactly which of your own files each of its lines replaces.
 
 ## Setup (once)
 
@@ -32,6 +32,15 @@ cp .env.template .env      # then edit .env and paste your key
 uv run --env-file .env python episodes/01_agent.py
 ```
 
+One exception: **`episodes/12_framework.py` runs in its own environment.**
+`openai-agents` pins `mcp>=1.19,<2` and FastMCP 4 (Ep10, Ep12) needs `mcp>=2`, so the two
+cannot be installed side by side. The file carries its own dependencies in a PEP 723
+header, and `--no-project` tells uv to use them instead of this project's:
+
+```bash
+uv run --env-file .env --no-project episodes/12_framework.py
+```
+
 ## Episodes
 
 | Ep | Topic |
@@ -46,6 +55,8 @@ uv run --env-file .env python episodes/01_agent.py
 | 08 | Multi-agent — an orchestrator hands work to narrow workers; a hand-off is a recursive tool call, and the tracer nests |
 | 09 | Reflection — the agent critiques its OWN draft with tools, then revises until the critic passes (Reflexion, by hand) |
 | 10 | MCP with FastMCP — the agent uses tools it didn't write, discovered at runtime, on the new **stateless** `2026-07-28` protocol revision (no more `initialize` handshake) |
+| 11 | Guardrails, cost caps & evals — a step cap, a budget and a tool allowlist enforced *in the tracer*, plus the evals that prove you didn't break anything |
+| 12 | **The finale** — the whole season in one agent (loop + tracer + critic + MCP + policy), the day the server ships a `refund` tool nobody reviewed, and the same agent in a real framework |
 
 ## Security
 
